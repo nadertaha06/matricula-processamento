@@ -31,4 +31,4 @@ def test_settings_tem_os_defaults_do_servico():
 
     assert settings.app_name == "matricula-processamento"
     assert settings.port == 8003
-    assert settings.db_name == "processamento_db"
+    assert Settings.model_fields["db_name"].default == "processamento_db"
