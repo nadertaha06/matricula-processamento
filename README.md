@@ -109,6 +109,6 @@ Prometheus/Grafana, gateway e testes de carga pertencem a etapa 4. Os relatorios
 
 ## Acesso publico pela porta 8080
 
-Swagger: http://13.220.42.157:8080/processamento/docs
+Swagger: http://13.220.42.157:8080/api/processamento/docs
 
-O proxy do repositorio de infraestrutura encaminha `/processamento/` para este servico. Na EC2, `ROOT_PATH=/processamento` mantem o OpenAPI e o Swagger usando o endereco publico correto. A porta interna 8003 continua sendo usada para comunicacao entre servicos.
+O proxy do repositorio de infraestrutura encaminha `/api/processamento/` para este servico. Na EC2, `ROOT_PATH=/api/processamento` mantem o OpenAPI e o Swagger usando o endereco publico correto. A porta interna 8003 continua sendo usada para comunicacao entre servicos.
