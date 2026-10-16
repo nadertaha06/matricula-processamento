@@ -7,6 +7,7 @@ class ServicosAcademicos:
     def __init__(self, client=None):
         self.client = client or httpx.Client(timeout=5, trust_env=False)
         self.settings = get_settings()
+        self.client.headers['X-Service-Token'] = self.settings.internal_api_token
 
     def solicitacao(self, sid):
         r = self.client.get(f'{self.settings.solicitacoes_url}/matriculas/{quote(sid, safe="")}')

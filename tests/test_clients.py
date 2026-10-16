@@ -29,3 +29,15 @@ def test_falhas_http_nao_sao_transformadas_em_aprovacao(method,args,status,paylo
     with pytest.raises(httpx.HTTPStatusError):
         getattr(servicos,method)(*args)
     servicos.close()
+
+
+def test_internal_http_uses_private_credential(monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), 'internal_api_token', 'private-service-token')
+    def endpoint(request):
+        if request.headers.get('X-Service-Token') != 'private-service-token':
+            return httpx.Response(401)
+        return httpx.Response(200, json={'id':'t'})
+    client = ServicosAcademicos(httpx.Client(transport=httpx.MockTransport(endpoint)))
+    assert client.turma('t') == {'id':'t'}
+    client.close()
