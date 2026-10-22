@@ -1,5 +1,6 @@
 import httpx
 import pytest
+from prometheus_client import REGISTRY
 from app.clients import ServicosAcademicos
 
 pytestmark = pytest.mark.unit
@@ -41,3 +42,41 @@ def test_internal_http_uses_private_credential(monkeypatch):
     client = ServicosAcademicos(httpx.Client(transport=httpx.MockTransport(endpoint)))
     assert client.turma('t') == {'id':'t'}
     client.close()
+
+
+def valor(nome, **labels):
+    return REGISTRY.get_sample_value(nome, labels) or 0.0
+
+
+def test_metricas_por_destino_e_status():
+    def endpoint(request):
+        if request.url.path.startswith('/turmas/t/reservas'):
+            return httpx.Response(409 if request.method == 'POST' else 404, json={'detail':'SEM_VAGAS'})
+        return httpx.Response(200, json={'id':'x', 'disciplinas':[]})
+    esperado = {('disciplinas','200'):1, ('disciplinas','409'):1, ('disciplinas','404'):1, ('solicitacoes','200'):2}
+    antes = {k: valor('chamadas_http_saida_total', destino=k[0], status=k[1]) for k in esperado}
+    duracao = {d: valor('chamadas_http_saida_duracao_seconds_count', destino=d) for d in ('disciplinas','solicitacoes')}
+    servicos = ServicosAcademicos(httpx.Client(transport=httpx.MockTransport(endpoint)))
+    servicos.turma('t')
+    servicos.solicitacao('s')
+    servicos.historico('a')
+    assert servicos.reservar({'turma_id':'t','solicitacao_id':'s','aluno_id':'a'}) == 'SEM_VAGAS'
+    servicos.liberar({'turma_id':'t','solicitacao_id':'s'})
+    servicos.close()
+    assert {k: valor('chamadas_http_saida_total', destino=k[0], status=k[1]) - antes[k] for k in esperado} == esperado
+    assert valor('chamadas_http_saida_duracao_seconds_count', destino='disciplinas') - duracao['disciplinas'] == 3
+    assert valor('chamadas_http_saida_duracao_seconds_count', destino='solicitacoes') - duracao['solicitacoes'] == 2
+
+
+@pytest.mark.parametrize('falha', [httpx.ConnectError('recusada'), httpx.ReadTimeout('tempo esgotado')])
+def test_falha_de_conexao_ou_timeout_conta_erro(falha):
+    def endpoint(request):
+        raise falha
+    antes = valor('chamadas_http_saida_total', destino='solicitacoes', status='erro')
+    duracao = valor('chamadas_http_saida_duracao_seconds_count', destino='solicitacoes')
+    servicos = ServicosAcademicos(httpx.Client(transport=httpx.MockTransport(endpoint)))
+    with pytest.raises(httpx.TransportError):
+        servicos.solicitacao('s')
+    servicos.close()
+    assert valor('chamadas_http_saida_total', destino='solicitacoes', status='erro') - antes == 1
+    assert valor('chamadas_http_saida_duracao_seconds_count', destino='solicitacoes') - duracao == 1

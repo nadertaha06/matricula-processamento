@@ -1,4 +1,5 @@
 import pytest
+from prometheus_client import REGISTRY
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.db import get_engine
@@ -153,3 +154,34 @@ def test_nova_solicitacao_nao_ultrapassa_fila_pendente(client):
     executar(candidato('b', coef=7),api)
     assert 'b' not in api.reservas
     assert client.get('/avaliacoes/b').json()['resultado'] == 'EM_ESPERA'
+
+
+def valor(nome, **labels):
+    return REGISTRY.get_sample_value(nome, labels) or 0.0
+
+
+def test_metricas_de_avaliacao_e_promocao(client):
+    resultados = ('deferida', 'indeferida', 'em_espera')
+    antes = {r: valor('avaliacoes_total', resultado=r) for r in resultados}
+    promocoes = valor('promocoes_lista_espera_total')
+    api = Academico()
+    api.motivo = 'SEM_VAGAS'
+    executar(candidato('a', coef=9), api)   # em_espera
+    executar(candidato('a', coef=9), api)   # redelivery with the same result: not counted
+    executar(candidato('b', coef=8), api)   # em_espera behind 'a'
+    api.motivo = None
+    with Session(get_engine()) as s, s.begin():
+        process_event(s, 'vaga.liberada', {'turma_id':'t'}, api)   # 'a' promoted
+    with Session(get_engine()) as s:
+        promover(s, 't', api)                                     # 'b' promoted, then rolled back
+        s.rollback()
+    api.oferta = {'pre_requisitos':['CAL1']}
+    executar(candidato('c'), api)            # indeferida
+    assert {r: valor('avaliacoes_total', resultado=r) - antes[r] for r in resultados} == {
+        'deferida': 1, 'indeferida': 1, 'em_espera': 2}
+    assert valor('promocoes_lista_espera_total') - promocoes == 1
+    assert client.get('/avaliacoes/b').json()['resultado'] == 'EM_ESPERA'
+    texto = client.get('/metrics').text
+    for nome in ('avaliacoes_total{resultado="deferida"}', 'promocoes_lista_espera_total ',
+                 '# TYPE chamadas_http_saida_total counter', '# TYPE chamadas_http_saida_duracao_seconds histogram'):
+        assert nome in texto

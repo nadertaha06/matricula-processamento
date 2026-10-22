@@ -32,6 +32,33 @@ A prontidao HTTP nao substitui a verificacao da fila: o teste E2E cobre os worke
 Horarios usam `dia_semana` de 0 (segunda) a 6 (domingo), `inicio` e `fim` no formato `HH:MM`.
 Intervalos adjacentes nao conflitam, e o conflito de matricula se limita ao mesmo periodo letivo.
 
+## Métricas
+
+`GET /metrics` expoe as metricas no formato Prometheus, sem autenticacao e fora do OpenAPI.
+O gateway publico bloqueia esse caminho; o Prometheus coleta pela rede Docker interna (`http://matricula-processamento:8003/metrics`).
+
+Comuns aos tres servicos (`app/metrics.py`):
+
+| Metrica | Tipo | Labels |
+|---|---|---|
+| `http_requests_total` | counter | `method`, `route` (template da rota ou `nao_mapeada`), `status` |
+| `http_request_duration_seconds` | histogram | `method`, `route` |
+| `http_requests_em_andamento` | gauge | - |
+| `mensagens_consumidas_total` | counter | `fila`, `resultado`: `processada`, `duplicada`, `retentativa`, `dlq` |
+| `mensagens_publicadas_total` | counter | `topico` (publicacao confirmada do outbox) |
+| `worker_conectado` | gauge | - (1 com conexao aberta ao RabbitMQ) |
+
+Deste servico:
+
+| Metrica | Tipo | Labels |
+|---|---|---|
+| `avaliacoes_total` | counter | `resultado`: `deferida`, `indeferida`, `em_espera` |
+| `promocoes_lista_espera_total` | counter | - |
+| `chamadas_http_saida_total` | counter | `destino`: `disciplinas`, `solicitacoes`; `status`: codigo HTTP ou `erro` (falha de conexao/timeout) |
+| `chamadas_http_saida_duracao_seconds` | histogram | `destino` |
+
+`avaliacoes_total` conta cada resultado novo publicado em `matricula.avaliada` (reentregas sem mudanca nao contam) e `promocoes_lista_espera_total` conta candidatos em espera deferidos ao surgir vaga; ambas sao contadas apos o commit do consumo. As chamadas HTTP de saida sao contadas ao terminar cada chamada, pois nao participam da transacao.
+
 ## Testes e cobertura
 
 Instale as dependencias de desenvolvimento:

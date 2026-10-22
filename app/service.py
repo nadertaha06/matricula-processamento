@@ -1,10 +1,19 @@
 from datetime import datetime, timezone
+from prometheus_client import Counter
 from sqlalchemy import select
 from app.config import get_settings
 from app.events import emit
+from app.metrics import apos_commit
 from app.models import Lote, Avaliacao
 from app.strategies import CriterioDesempateFactory, faltam_pre_requisitos
 from app.clients import ServicosAcademicos
+
+# Event handlers run inside worker.consume_one's transaction: increments wait for its COMMIT.
+AVALIACOES = Counter('avaliacoes_total', 'Avaliacoes com resultado novo publicado em matricula.avaliada.',
+    ('resultado',))
+for _resultado in ('deferida', 'indeferida', 'em_espera'):
+    AVALIACOES.labels(resultado=_resultado)
+PROMOCOES = Counter('promocoes_lista_espera_total', 'Candidatos da lista de espera deferidos ao surgir vaga.')
 
 
 def criterio(session, turma_id):
@@ -55,6 +64,7 @@ def avaliar(session, candidato, servicos, permitir_reserva=True):
     avaliacao.revisao += 1
     emit(session, 'matricula.avaliada', {'solicitacao_id':sid, 'resultado':resultado, 'motivo':motivo,
         'revisao':avaliacao.revisao, 'avaliado_em':datetime.now(timezone.utc).isoformat()})
+    apos_commit(session, AVALIACOES.labels(resultado=resultado.lower()).inc)
     session.flush()
     return resultado
 
@@ -65,6 +75,8 @@ def promover(session, turma_id, servicos):
         return
     # One candidate per transaction: a later HTTP failure cannot roll back a seat already granted.
     resultado = avaliar(session, candidatos[0], servicos)
+    if resultado == 'DEFERIDA':
+        apos_commit(session, PROMOCOES.inc)
     if resultado != 'EM_ESPERA':
         emit(session, 'lista.reavaliar', {'turma_id': turma_id})
 
